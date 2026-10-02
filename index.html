@@ -568,10 +568,18 @@ function renderResult(rounds,playCount,warnings,roundMins,noScroll) {
 }
 
 /* ─── PNG Export ─── */
-function saveImage() {
+async function saveImage() {
   const status = document.getElementById('saveStatus');
   if (!_lastRounds.length) { status.textContent='❌ กรุณาสุ่มจับคู่ก่อน'; return; }
   status.textContent='⏳ กำลังสร้างรูป...';
+  try {
+    if (document.fonts && document.fonts.load) {
+      await Promise.all([
+        document.fonts.load('bold 40px Sarabun','ก'), document.fonts.load('22px Sarabun','ก'),
+        document.fonts.load('bold 36px Mali','ก')
+      ]);
+    }
+  } catch(e) {}
 
   const rounds    = _lastRounds;
   const roundMins = _lastRoundMins;
@@ -781,17 +789,40 @@ function saveImage() {
   t('สร้างเมื่อ '+dateStr+'  ·  '+timeStr+' น.', W/2, H-BOT_BAR-18, '22px Sarabun', DIM,'center');
   gradBar(H-BOT_BAR, BOT_BAR);
 
+  const stamp=`${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+  const filename='badminton_'+stamp+'.png';
+  const blob = await new Promise(res=>canvas.toBlob(res,'image/png'));
+  if (!blob) { status.textContent='❌ สร้างรูปไม่สำเร็จ'; return; }
+
+  // 1) ผ่านระบบดาวน์โหลดของ Claude (หน้าที่เผยแพร่แล้ว)
+  let handled = false;
   try {
-    const link=document.createElement('a');
-    const stamp=`${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
-    link.download='badminton_'+stamp+'.png';
-    link.href=canvas.toDataURL('image/png');
-    link.click();
-    status.textContent='✅ ดาวน์โหลดสำเร็จ!';
-  } catch(e){
-    const w=window.open();
-    w.document.write('<img src="'+canvas.toDataURL()+'" style="max-width:100%">');
-    status.textContent='✅ เปิดรูปในแท็บใหม่ — กด press & hold เพื่อบันทึก';
+    const dl = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null;
+    if (dl) {
+      handled = true;
+      try {
+        await dl.save({ filename, data: blob });
+        status.textContent='✅ ดาวน์โหลดสำเร็จ!';
+      } catch(err) {
+        status.textContent = (err && err.code==='declined') ? 'ยกเลิกการบันทึก' : '❌ บันทึกไม่สำเร็จ ('+((err&&err.code)||'error')+')';
+      }
+    }
+  } catch(e) {}
+
+  // 2) เปิดไฟล์ HTML ตรงๆ ในเบราว์เซอร์
+  if (!handled) {
+    try {
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.download=filename; link.href=url;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),10000);
+      status.textContent='✅ ดาวน์โหลดสำเร็จ!';
+    } catch(e){
+      const w=window.open();
+      if (w) { w.document.write('<img src="'+canvas.toDataURL()+'" style="max-width:100%">'); }
+      status.textContent='✅ เปิดรูปในแท็บใหม่ — กดค้างเพื่อบันทึก';
+    }
   }
   setTimeout(()=>status.textContent='',5000);
 }
