@@ -260,6 +260,16 @@ input[type="number"]{padding:6px 8px;font-size:.85rem;border-radius:8px}
 .rest-row{margin-top:5px;padding:4px 8px;font-size:.66rem}
 .rest-name{font-size:.66rem;padding:1px 7px 1px 4px}
 #saveStatus{font-size:.74rem}
+
+/* Image preview modal (fallback for in-app browsers e.g. LINE) */
+#imgModal{position:fixed;inset:0;z-index:2000;background:rgba(40,28,60,.82);display:none;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px;padding:calc(14px + env(safe-area-inset-top,0px)) 12px calc(14px + env(safe-area-inset-bottom,0px));overflow:auto}
+#imgModal.show{display:flex}
+#imgModal .im-tip{color:#fff;font-size:.9rem;text-align:center;font-weight:600;line-height:1.5}
+#imgModal img{max-width:100%;height:auto;background:#fff;border-radius:10px;-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto}
+#imgModal .im-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+#imgModal .im-row button,#imgModal .im-row a{font-family:'Mali',cursive;font-size:.9rem;font-weight:700;padding:9px 16px;border-radius:12px;border:none;cursor:pointer;text-decoration:none;background:#fff;color:#3e2e57}
+#imgModal .im-row .im-primary{background:var(--accent);color:#fff}
+.link-btn{background:none;border:none;color:var(--accent);text-decoration:underline;font-family:'Sarabun',sans-serif;font-size:inherit;padding:0 2px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -336,6 +346,15 @@ input[type="number"]{padding:6px 8px;font-size:.85rem;border-radius:8px}
 
 </div><!-- /container -->
 
+<div id="imgModal" onclick="if(event.target===this)closeImgModal()">
+  <div class="im-tip">📱 กดค้างที่รูป แล้วเลือก “บันทึกรูปภาพ / Save image”</div>
+  <img id="imgModalImg" alt="ตารางจับคู่แบดมินตัน">
+  <div class="im-row">
+    <button class="im-primary" id="imShareBtn" style="display:none" onclick="shareCurrentImage()">⬆️ แชร์ / บันทึก</button>
+    <a id="imDlLink" download="badminton.png">⬇️ ดาวน์โหลด</a>
+    <button onclick="closeImgModal()">ปิด</button>
+  </div>
+</div>
 <script>
 let players = [];
 let _lastRounds = [];
@@ -567,6 +586,29 @@ function renderResult(rounds,playCount,warnings,roundMins,noScroll) {
   if(!noScroll) section.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
+
+let _lastImg = null;
+function openImgModal(){
+  if(!_lastImg) return;
+  const m=document.getElementById('imgModal');
+  document.getElementById('imgModalImg').src=_lastImg.dataUrl;
+  const a=document.getElementById('imDlLink'); a.href=_lastImg.dataUrl; a.download=_lastImg.filename;
+  const sb=document.getElementById('imShareBtn');
+  try{
+    const f=new File([_lastImg.blob],_lastImg.filename,{type:'image/png'});
+    sb.style.display=(navigator.canShare&&navigator.canShare({files:[f]}))?'':'none';
+  }catch(e){sb.style.display='none';}
+  m.classList.add('show');
+}
+function closeImgModal(){ document.getElementById('imgModal').classList.remove('show'); }
+async function shareCurrentImage(){
+  if(!_lastImg) return;
+  try{
+    const f=new File([_lastImg.blob],_lastImg.filename,{type:'image/png'});
+    await navigator.share({files:[f],title:'ตารางจับคู่แบดมินตัน'});
+  }catch(e){ /* ผู้ใช้ยกเลิกหรือแชร์ไม่ได้ — ให้กดค้างที่รูปแทน */ }
+}
+
 /* ─── PNG Export ─── */
 async function saveImage() {
   const status = document.getElementById('saveStatus');
@@ -794,37 +836,50 @@ async function saveImage() {
   const blob = await new Promise(res=>canvas.toBlob(res,'image/png'));
   if (!blob) { status.textContent='❌ สร้างรูปไม่สำเร็จ'; return; }
 
-  // 1) ผ่านระบบดาวน์โหลดของ Claude (หน้าที่เผยแพร่แล้ว)
-  let handled = false;
+  const dataUrl = canvas.toDataURL('image/png');
+  _lastImg = { blob, dataUrl, filename };
+  const ua = navigator.userAgent || '';
+  const inApp = /Line\/|FBAN|FBAV|Instagram|MicroMessenger|TikTok|Messenger|; wv\)|WebView/i.test(ua);
+
+  // 1) ระบบดาวน์โหลดของ Claude (ถ้ามี) — รอไม่เกิน 2.5 วินาที
   try {
-    const dl = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null;
+    const dl = (window.claude && window.claude.use)
+      ? await Promise.race([window.claude.use('downloads'), new Promise(r=>setTimeout(()=>r(null),2500))])
+      : null;
     if (dl) {
-      handled = true;
       try {
         await dl.save({ filename, data: blob });
         status.textContent='✅ ดาวน์โหลดสำเร็จ!';
+        setTimeout(()=>status.textContent='',5000);
+        return;
       } catch(err) {
-        status.textContent = (err && err.code==='declined') ? 'ยกเลิกการบันทึก' : '❌ บันทึกไม่สำเร็จ ('+((err&&err.code)||'error')+')';
+        if (err && err.code==='declined') { status.textContent='ยกเลิกการบันทึก'; setTimeout(()=>status.textContent='',3000); return; }
+        // error อื่น -> ไปใช้วิธีสำรองด้านล่าง
       }
     }
   } catch(e) {}
 
-  // 2) เปิดไฟล์ HTML ตรงๆ ในเบราว์เซอร์
-  if (!handled) {
-    try {
-      const url=URL.createObjectURL(blob);
-      const link=document.createElement('a');
-      link.download=filename; link.href=url;
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(()=>URL.revokeObjectURL(url),10000);
-      status.textContent='✅ ดาวน์โหลดสำเร็จ!';
-    } catch(e){
-      const w=window.open();
-      if (w) { w.document.write('<img src="'+canvas.toDataURL()+'" style="max-width:100%">'); }
-      status.textContent='✅ เปิดรูปในแท็บใหม่ — กดค้างเพื่อบันทึก';
-    }
+  // 2) เบราว์เซอร์ในแอพ (LINE, Facebook, IG ฯลฯ) บล็อกการดาวน์โหลด -> แสดงรูปให้กดค้างบันทึก
+  if (inApp) {
+    openImgModal();
+    status.textContent='👆 กดค้างที่รูปเพื่อบันทึก';
+    return;
   }
-  setTimeout(()=>status.textContent='',5000);
+
+  // 3) เบราว์เซอร์ปกติ: ดาวน์โหลดตรงๆ
+  try {
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.download=filename; link.href=url; link.rel='noopener';
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),15000);
+    status.innerHTML='✅ สั่งดาวน์โหลดแล้ว · ถ้าไม่ได้ไฟล์ <button class="link-btn" onclick="openImgModal()">กดที่นี่เพื่อดูรูปแล้วกดค้างบันทึก</button>';
+    return;
+  } catch(e) {
+    openImgModal();
+    status.textContent='👆 กดค้างที่รูปเพื่อบันทึก';
+    return;
+  }
 }
 
 
