@@ -347,8 +347,21 @@ input[type="number"]{padding:6px 8px;font-size:.85rem;border-radius:8px}
 </div><!-- /container -->
 
 <div id="imgModal" onclick="if(event.target===this)closeImgModal()">
-  <div class="im-tip">📱 กดค้างที่รูป แล้วเลือก “บันทึกรูปภาพ / Save image”</div>
+  <div class="im-tip" id="imTip">📱 กดค้างที่รูป แล้วเลือก “บันทึกรูปภาพ / Save image”</div>
   <img id="imgModalImg" alt="ตารางจับคู่แบดมินตัน">
+  <div id="imExt" style="display:none;width:100%;max-width:520px;background:#fff;border-radius:14px;padding:12px;text-align:center">
+    <div style="font-size:.84rem;color:#3e2e57;font-weight:700;margin-bottom:8px">✅ วิธีที่ชัวร์ที่สุด: เปิดในเบราว์เซอร์ แล้วกดดาวน์โหลด</div>
+    <div class="im-row" style="margin-bottom:8px">
+      <a id="imExtLink" class="im-primary" target="_blank" rel="noopener" href="#">🌐 เปิดในเบราว์เซอร์</a>
+      <a id="imChromeLink" class="im-primary" style="display:none" href="#">Chrome</a>
+    </div>
+    <div style="font-size:.74rem;color:#9282ab;margin-bottom:4px">หรือคัดลอกลิงก์ไปวางใน Chrome / Safari</div>
+    <div style="display:flex;gap:6px">
+      <input type="text" id="imUrl" readonly style="flex:1;min-width:0;font-size:.75rem;padding:6px 8px" onclick="this.select()">
+      <button class="btn-mini" onclick="copyAppUrl(this)">คัดลอก</button>
+    </div>
+    <div style="font-size:.7rem;color:#9282ab;margin-top:6px">ในเบราว์เซอร์ให้สุ่มจับคู่ใหม่ แล้วกด “บันทึกรูป” จะได้ไฟล์ทันที</div>
+  </div>
   <div class="im-row">
     <button class="im-primary" id="imShareBtn" style="display:none" onclick="shareCurrentImage()">⬆️ แชร์ / บันทึก</button>
     <a id="imDlLink" download="badminton.png">⬇️ ดาวน์โหลด</a>
@@ -587,12 +600,38 @@ function renderResult(rounds,playCount,warnings,roundMins,noScroll) {
 }
 
 
+
+const APP_URL='https://claude.ai/artifact/F4HKRRSJrxGJReLFvAEugc';
+function copyAppUrl(btn){
+  const inp=document.getElementById('imUrl'); const url=inp.value;
+  const done=()=>{ const o=btn.textContent; btn.textContent='คัดลอกแล้ว ✓'; setTimeout(()=>btn.textContent=o,2000); };
+  try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done,()=>{inp.select();try{document.execCommand('copy');done();}catch(e){}}); return; } }catch(e){}
+  inp.focus(); inp.select(); try{ inp.setSelectionRange(0,9999); document.execCommand('copy'); done(); }catch(e){}
+}
 let _lastImg = null;
 function openImgModal(){
   if(!_lastImg) return;
   const m=document.getElementById('imgModal');
   document.getElementById('imgModalImg').src=_lastImg.dataUrl;
   const a=document.getElementById('imDlLink'); a.href=_lastImg.dataUrl; a.download=_lastImg.filename;
+  const inApp=/Line\/|FBAN|FBAV|Instagram|MicroMessenger|TikTok|Messenger|; wv\)|WebView/i.test(navigator.userAgent||'');
+  // เบราว์เซอร์ในแอพ (LINE ฯลฯ) บล็อกลิงก์ดาวน์โหลด -> ซ่อนปุ่ม ให้กดค้างที่รูปแทน
+  a.style.display=inApp?'none':'';
+  const ext=document.getElementById('imExt');
+  ext.style.display=inApp?'block':'none';
+  if(inApp){
+    const extUrl=APP_URL+'?openExternalBrowser=1';
+    document.getElementById('imExtLink').href=extUrl;
+    document.getElementById('imUrl').value=APP_URL;
+    const ch=document.getElementById('imChromeLink');
+    if(/Android/i.test(navigator.userAgent)){
+      ch.style.display='';
+      ch.href='intent://'+APP_URL.replace(/^https:\/\//,'')+'#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='+encodeURIComponent(extUrl)+';end';
+    } else ch.style.display='none';
+  }
+  document.getElementById('imTip').innerHTML=inApp
+    ? '📱 กดค้างที่รูปด้านล่าง แล้วเลือก “บันทึกรูปภาพ / Save image”<br><span style="font-weight:400;font-size:.78rem;opacity:.9">(LINE ไม่รองรับปุ่มดาวน์โหลด)</span>'
+    : '📱 กดค้างที่รูป แล้วเลือก “บันทึกรูปภาพ / Save image” หรือกดปุ่มดาวน์โหลด';
   const sb=document.getElementById('imShareBtn');
   try{
     const f=new File([_lastImg.blob],_lastImg.filename,{type:'image/png'});
